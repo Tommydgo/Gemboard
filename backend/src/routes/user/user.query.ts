@@ -1,6 +1,5 @@
-import pool from '../../config/db'
+import pool, { RowDataPacket, ResultSetHeader } from '../../config/db'
 import bcrypt from 'bcryptjs'
-import { RowDataPacket, ResultSetHeader } from 'mysql2';
 
 interface User extends RowDataPacket {
     id: number;

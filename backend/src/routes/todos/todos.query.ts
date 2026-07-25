@@ -1,5 +1,4 @@
-import pool from '../../config/db'
-import { RowDataPacket, ResultSetHeader } from 'mysql2';
+import pool, { RowDataPacket, ResultSetHeader } from '../../config/db'
 
 interface Todo extends RowDataPacket {
     id: number;
