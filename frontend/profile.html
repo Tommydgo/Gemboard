@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemboard — Profil</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" type="image/png" href="resources/gemboard-icon.png">
+</head>
+<body>
+    <nav class="navbar">
+        <a class="navbar-brand" href="board.html"><img src="resources/gemboard-icon.png" alt="" class="brand-icon">gemboard_</a>
+        <ul class="navbar-links">
+            <li><a href="board.html">Tableaux</a></li>
+            <li><a href="profile.html" class="active">Profil</a></li>
+            <li><button class="logout" onclick="logout()">Déconnexion</button></li>
+        </ul>
+    </nav>
+
+    <main class="main" style="max-width: 560px;">
+        <div class="page-header" style="margin-bottom: 24px;">
+            <div>
+                <h1 class="page-title">Profil</h1>
+                <p class="page-subtitle">Gérez vos informations personnelles</p>
+            </div>
+        </div>
+
+        <div class="profile-card" id="profileCard" style="display:none;">
+            <div class="alert alert-error" id="errorMsg" role="alert"></div>
+            <div class="alert alert-success" id="successMsg" role="status"></div>
+
+            <form id="profileForm" novalidate>
+                <h3 class="section-title">Informations</h3>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="firstname">Prénom</label>
+                        <input type="text" id="firstname" class="form-input"
+                            autocomplete="given-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="name">Nom</label>
+                        <input type="text" id="name" class="form-input"
+                            autocomplete="family-name" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="email">Email</label>
+                    <input type="email" id="email" class="form-input"
+                        autocomplete="email" required>
+                </div>
+
+                <h3 class="section-title" style="margin-top: 24px;">Changer le mot de passe</h3>
+                <div class="form-group" style="margin-bottom: 22px;">
+                    <label class="form-label" for="password">Nouveau mot de passe <span style="font-weight:400;text-transform:none;letter-spacing:0;">(laisser vide pour ne pas changer)</span></label>
+                    <input type="password" id="password" class="form-input"
+                        placeholder="••••••••"
+                        autocomplete="new-password">
+                </div>
+
+                <button type="submit" class="btn btn-primary" id="saveBtn">
+                    Enregistrer les modifications
+                </button>
+            </form>
+        </div>
+
+        <div class="loading-state" id="loadingState">
+            <span class="spinner"></span> Chargement…
+        </div>
+    </main>
+
+    <!-- Toast -->
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="js/auth.js"></script>
+    <script src="js/api.js"></script>
+    <script>
+        requireAuth();
+
+        let userId = null;
+
+        function showToast(msg, isError = false) {
+            const el = document.getElementById('toast');
+            el.textContent = msg;
+            el.className = 'toast show' + (isError ? ' error' : '');
+            clearTimeout(el._timer);
+            el._timer = setTimeout(() => el.classList.remove('show'), 3500);
+        }
+
+        async function loadProfile() {
+            try {
+                const user = await getUser();
+                userId = user.id;
+
+                document.getElementById('firstname').value = user.firstname || '';
+                document.getElementById('name').value      = user.name      || '';
+                document.getElementById('email').value     = user.email     || '';
+
+                document.getElementById('loadingState').style.display = 'none';
+                document.getElementById('profileCard').style.display  = 'block';
+            } catch (err) {
+                document.getElementById('loadingState').innerHTML =
+                    `<div class="alert alert-error show">${err.message}</div>`;
+            }
+        }
+
+        document.getElementById('profileForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const errorMsg  = document.getElementById('errorMsg');
+            const successMsg = document.getElementById('successMsg');
+            const saveBtn   = document.getElementById('saveBtn');
+
+            errorMsg.classList.remove('show');
+            successMsg.classList.remove('show');
+
+            const firstname = document.getElementById('firstname').value.trim();
+            const name      = document.getElementById('name').value.trim();
+            const email     = document.getElementById('email').value.trim();
+            const password  = document.getElementById('password').value;
+
+            if (!firstname || !name || !email) {
+                errorMsg.textContent = 'Prénom, nom et email sont requis.';
+                errorMsg.classList.add('show');
+                return;
+            }
+
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span class="spinner"></span>&nbsp;Enregistrement…';
+
+            try {
+                await updateUser(userId, email, name, firstname, password || null);
+                document.getElementById('password').value = '';
+                showToast('Profil mis à jour !');
+            } catch (err) {
+                errorMsg.textContent = err.message;
+                errorMsg.classList.add('show');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Enregistrer les modifications';
+            }
+        });
+
+        loadProfile();
+    </script>
+</body>
+</html>

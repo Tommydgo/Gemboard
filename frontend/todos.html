@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemboard — Mes tâches</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" type="image/png" href="resources/gemboard-icon.png">
+</head>
+<body>
+    <nav class="navbar">
+        <a class="navbar-brand" href="board.html"><img src="resources/gemboard-icon.png" alt="" class="brand-icon">gemboard_</a>
+        <ul class="navbar-links">
+            <li><a href="board.html">← Tableaux</a></li>
+            <li><a href="profile.html">Profil</a></li>
+            <li><button class="logout" onclick="logout()">Déconnexion</button></li>
+        </ul>
+    </nav>
+
+    <main class="main board-view">
+        <div class="page-header">
+            <div>
+                <h1 class="page-title" id="pageTitle">Chargement…</h1>
+                <p class="page-subtitle" id="todoCount">Chargement…</p>
+            </div>
+        </div>
+
+        <div id="boardColumns" class="board-columns" ondragover="handleColumnsContainerDragOver(event)" ondrop="handleColumnsContainerDrop(event)"></div>
+    </main>
+
+    <!-- Toast -->
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <!-- Modal create / edit todo -->
+    <div class="modal-backdrop" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modalTitle">Nouvelle tâche</h2>
+                <button class="modal-close" onclick="closeModal()" aria-label="Fermer">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+
+            <form id="todoForm" novalidate>
+                <div class="form-group">
+                    <label class="form-label" for="todoTitle">Titre</label>
+                    <input type="text" id="todoTitle" class="form-input" placeholder="Ma tâche" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="todoDesc">Description</label>
+                    <textarea id="todoDesc" class="form-input" placeholder="Détails…" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="due_time">Date limite</label>
+                    <input type="datetime-local" id="due_time" class="form-input" required>
+                </div>
+                <div class="form-group" id="statusGroup" style="display:none;">
+                    <label class="form-label" for="todoStatus">Statut</label>
+                    <select id="todoStatus" class="form-input">
+                        <option value="todo">À faire</option>
+                        <option value="in progress">En cours</option>
+                        <option value="done">Terminé</option>
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Annuler</button>
+                    <button type="submit" class="btn btn-primary" id="saveBtn">Enregistrer</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal create / rename list -->
+    <div class="modal-backdrop" id="listModal" role="dialog" aria-modal="true" aria-labelledby="listModalTitle">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title" id="listModalTitle">Nouvelle liste</h2>
+                <button class="modal-close" onclick="closeListModal()" aria-label="Fermer">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+
+            <form id="listForm" novalidate>
+                <div class="form-group">
+                    <label class="form-label" for="listTitle">Nom</label>
+                    <input type="text" id="listTitle" class="form-input" placeholder="Frontend" required>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeListModal()">Annuler</button>
+                    <button type="submit" class="btn btn-primary" id="listSaveBtn">Enregistrer</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script src="js/api.js"></script>
+    <script>
+        requireAuth();
+
+        const boardId = Number(new URLSearchParams(window.location.search).get('board_id'));
+        if (Number.isNaN(boardId)) {
+            window.location.href = 'board.html';
+        }
+
+        let lists = [];
+        let todos = [];
+        let editingId = null;       // todo id being edited, or null when creating
+        let creatingForListId = null; // list id a new todo will be created into
+        let editingListId = null;   // list id being renamed, or null when creating a list
+        let draggedTodoId = null;   // todo id currently being dragged, or null
+        let draggedListId = null;   // list id currently being dragged, or null
+
+        // ── Helpers ──────────────────────────────────────────────
+
+        function escHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function statusClass(status) {
+            return 's-' + status.replace(/ /g, '-');
+        }
+
+        const STATUS_LABELS = {
+            'todo':        'À faire',
+            'in progress': 'En cours',
+            'done':        'Terminé'
+        };
+
+        function formatDue(dateStr) {
+            const d   = new Date(dateStr);
+            const now = new Date();
+            return {
+                label:   d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }),
+                overdue: d < now
+            };
+        }
+
+        function toDatetimeLocal(dateStr) {
+            const d   = new Date(dateStr);
+            const pad = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+
+        function showToast(msg, isError = false) {
+            const el = document.getElementById('toast');
+            el.textContent = msg;
+            el.className = 'toast show' + (isError ? ' error' : '');
+            clearTimeout(el._timer);
+            el._timer = setTimeout(() => el.classList.remove('show'), 3500);
+        }
+
+        function todosForList(listId) {
+            return todos.filter(t => t.list_id === listId).sort((a, b) => a.position - b.position);
+        }
+
+        // ── Render ───────────────────────────────────────────────
+
+        function updateCount() {
+            const el = document.getElementById('todoCount');
+            el.textContent = todos.length === 0
+                ? 'Aucune tâche'
+                : `${todos.length} tâche${todos.length > 1 ? 's' : ''}`;
+        }
+
+        function renderBoard() {
+            const container = document.getElementById('boardColumns');
+            updateCount();
+
+            const sortedLists = [...lists].sort((a, b) => a.position - b.position);
+            const columnsHtml = sortedLists.map(buildColumn).join('');
+            const addColumnHtml = `
+                <button class="board-column-add" onclick="openCreateListModal()">
+                    + Nouvelle liste
+                </button>`;
+
+            if (sortedLists.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state" style="width:100%;">
+                        <div class="empty-illustration">
+                            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="1.5" aria-hidden="true">
+                                <rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="9" x2="9" y2="20"/>
+                            </svg>
+                        </div>
+                        <p class="empty-title">Aucune liste pour l'instant</p>
+                        <p class="empty-desc">Une tâche doit appartenir à une liste — crée ta première liste pour commencer.</p>
+                        <div style="margin-top:16px;">
+                            <button class="btn btn-primary" onclick="openCreateListModal()">+ Nouvelle liste</button>
+                        </div>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = columnsHtml + addColumnHtml;
+        }
+
+        function buildColumn(list) {
+            const listTodos = todosForList(list.id);
+            const cardsHtml = listTodos.length === 0
+                ? `<p style="font-size:12.5px;color:var(--text-muted);padding:6px 4px;">Aucune tâche</p>`
+                : listTodos.map(buildCard).join('');
+
+            return `
+            <div class="board-column" data-list-id="${list.id}">
+                <div class="board-column-header" draggable="true"
+                     ondragstart="handleColumnDragStart(event, ${list.id})" ondragend="handleColumnDragEnd(event)">
+                    <span class="board-column-title">${escHtml(list.title)}</span>
+                    <div class="board-column-actions">
+                        <button class="btn btn-ghost btn-icon" onclick="openEditListModal(${list.id})" title="Renommer" aria-label="Renommer la liste">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        </button>
+                        <button class="btn btn-danger btn-icon" onclick="handleDeleteList(${list.id})" title="Supprimer" aria-label="Supprimer la liste">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="board-column-body" data-list-id="${list.id}"
+                     ondragover="handleColumnDragOver(event)" ondrop="handleColumnDrop(event, ${list.id})">
+                    ${cardsHtml}
+                </div>
+                <div class="board-column-footer">
+                    <button class="btn btn-ghost btn-sm" style="width:100%;" onclick="openCreateModal(${list.id})">+ Tâche</button>
+                </div>
+            </div>`;
+        }
+
+        function buildCard(todo) {
+            const { label, overdue } = formatDue(todo.due_time);
+            const sc  = statusClass(todo.status);
+            const opts = Object.entries(STATUS_LABELS).map(([v, l]) =>
+                `<option value="${v}"${v === todo.status ? ' selected' : ''}>${l}</option>`
+            ).join('');
+
+            return `
+            <div class="todo-card ${sc}" data-id="${todo.id}" draggable="true"
+                 ondragstart="handleCardDragStart(event, ${todo.id})" ondragend="handleCardDragEnd(event)">
+                <div class="todo-body">
+                    <div class="todo-title">${escHtml(todo.title)}</div>
+                    <div class="todo-meta">
+                        ${todo.description ? `<span class="todo-desc">${escHtml(todo.description)}</span>` : ''}
+                        <span class="todo-due${overdue && todo.status !== 'done' ? ' overdue' : ''}">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                            ${label}
+                        </span>
+                    </div>
+                </div>
+                <div class="todo-actions">
+                    <select class="status-select" onchange="handleStatusChange(${todo.id}, this.value)" aria-label="Changer le statut">
+                        ${opts}
+                    </select>
+                    <button class="btn btn-ghost btn-icon" onclick="openEditModal(${todo.id})" title="Modifier" aria-label="Modifier la tâche">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                    <button class="btn btn-danger btn-icon" onclick="handleDelete(${todo.id})" title="Supprimer" aria-label="Supprimer la tâche">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+                    </button>
+                </div>
+            </div>`;
+        }
+
+        // ── Data actions ─────────────────────────────────────────
+
+        async function loadBoard() {
+            try {
+                const board = await getBoard(boardId);
+                document.getElementById('pageTitle').textContent = board.name;
+            } catch (err) {
+                window.location.href = 'board.html';
+            }
+        }
+
+        async function loadData() {
+            document.getElementById('boardColumns').innerHTML =
+                '<div class="loading-state"><span class="spinner"></span> Chargement…</div>';
+            try {
+                [lists, todos] = await Promise.all([getLists(boardId), getTodos(boardId)]);
+                renderBoard();
+            } catch (err) {
+                document.getElementById('boardColumns').innerHTML =
+                    `<div class="alert alert-error show">${err.message}</div>`;
+            }
+        }
+
+        async function handleStatusChange(id, newStatus) {
+            const todo = todos.find(t => t.id === id);
+            if (!todo) return;
+            const card = document.querySelector(`.todo-card[data-id="${id}"]`);
+
+            try {
+                const updated = await updateTodo(id, todo.title, todo.description, newStatus, toDatetimeLocal(todo.due_time));
+                todos[todos.findIndex(t => t.id === id)] = updated;
+                card.className = `todo-card ${statusClass(newStatus)}`;
+                const title = card.querySelector('.todo-title');
+                title.style.textDecoration = newStatus === 'done' ? 'line-through' : '';
+                title.style.color          = newStatus === 'done' ? 'var(--text-muted)' : '';
+                const due = card.querySelector('.todo-due');
+                if (due) due.classList.toggle('overdue', newStatus !== 'done' && new Date(todo.due_time) < new Date());
+            } catch (err) {
+                const sel = card.querySelector('.status-select');
+                if (sel) sel.value = todo.status;
+                showToast(err.message, true);
+            }
+        }
+
+        async function handleDelete(id) {
+            if (!confirm('Supprimer cette tâche ?')) return;
+
+            try {
+                await deleteTodo(id);
+                todos = todos.filter(t => t.id !== id);
+                renderBoard();
+            } catch (err) {
+                showToast(err.message, true);
+            }
+        }
+
+        async function handleDeleteList(id) {
+            if (!confirm('Supprimer cette liste et toutes ses tâches ?')) return;
+
+            try {
+                await deleteList(id);
+                lists = lists.filter(l => l.id !== id);
+                todos = todos.filter(t => t.list_id !== id);
+                renderBoard();
+            } catch (err) {
+                showToast(err.message, true);
+            }
+        }
+
+        function handleCardDragStart(e, id) {
+            draggedTodoId = id;
+            e.dataTransfer.effectAllowed = 'move';
+            e.target.classList.add('dragging');
+        }
+
+        function handleCardDragEnd(e) {
+            e.target.classList.remove('dragging');
+            draggedTodoId = null;
+            document.querySelectorAll('.board-column').forEach(el => el.classList.remove('drag-over'));
+        }
+
+        function handleColumnDragOver(e) {
+            if (draggedTodoId === null) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            e.currentTarget.closest('.board-column').classList.add('drag-over');
+        }
+
+        async function handleColumnDrop(e, listId) {
+            e.preventDefault();
+            e.currentTarget.closest('.board-column').classList.remove('drag-over');
+            if (draggedTodoId === null) return;
+
+            const id = draggedTodoId;
+            const body = e.currentTarget;
+            const afterEl = [...body.querySelectorAll('.todo-card')].find(card => {
+                if (Number(card.dataset.id) === id) return false;
+                const rect = card.getBoundingClientRect();
+                return e.clientY < rect.top + rect.height / 2;
+            });
+            const targetTodos = todosForList(listId).filter(t => t.id !== id);
+            const targetIndex = afterEl
+                ? targetTodos.findIndex(t => t.id === Number(afterEl.dataset.id))
+                : targetTodos.length;
+
+            try {
+                await moveTodo(id, listId, targetIndex);
+                todos = await getTodos(boardId);
+                renderBoard();
+            } catch (err) {
+                showToast(err.message, true);
+                renderBoard();
+            }
+        }
+
+        function handleColumnDragStart(e, id) {
+            draggedListId = id;
+            e.dataTransfer.effectAllowed = 'move';
+        }
+
+        function handleColumnDragEnd(e) {
+            draggedListId = null;
+        }
+
+        function handleColumnsContainerDragOver(e) {
+            if (draggedListId === null) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        }
+
+        async function handleColumnsContainerDrop(e) {
+            e.preventDefault();
+            if (draggedListId === null) return;
+
+            const id = draggedListId;
+            const columnEls = [...document.querySelectorAll('.board-column')];
+            const afterEl = columnEls.find(col => {
+                if (Number(col.dataset.listId) === id) return false;
+                const rect = col.getBoundingClientRect();
+                return e.clientX < rect.left + rect.width / 2;
+            });
+            const targetLists = [...lists].sort((a, b) => a.position - b.position).filter(l => l.id !== id);
+            const targetIndex = afterEl
+                ? targetLists.findIndex(l => l.id === Number(afterEl.dataset.listId))
+                : targetLists.length;
+
+            try {
+                await moveList(id, targetIndex);
+                lists = await getLists(boardId);
+                renderBoard();
+            } catch (err) {
+                showToast(err.message, true);
+                renderBoard();
+            }
+        }
+
+        // ── Todo modal ───────────────────────────────────────────
+
+        function openCreateModal(listId) {
+            editingId = null;
+            creatingForListId = listId;
+            document.getElementById('modalTitle').textContent = 'Nouvelle tâche';
+            document.getElementById('todoForm').reset();
+            document.getElementById('statusGroup').style.display = 'none';
+
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            tomorrow.setHours(9, 0, 0, 0);
+            document.getElementById('due_time').value = toDatetimeLocal(tomorrow);
+
+            document.getElementById('modal').classList.add('open');
+            document.getElementById('todoTitle').focus();
+        }
+
+        function openEditModal(id) {
+            const todo = todos.find(t => t.id === id);
+            if (!todo) return;
+            editingId = id;
+            creatingForListId = null;
+
+            document.getElementById('modalTitle').textContent   = 'Modifier la tâche';
+            document.getElementById('todoTitle').value          = todo.title;
+            document.getElementById('todoDesc').value           = todo.description;
+            document.getElementById('due_time').value           = toDatetimeLocal(todo.due_time);
+            document.getElementById('statusGroup').style.display = 'block';
+            document.getElementById('todoStatus').value         = todo.status;
+
+            document.getElementById('modal').classList.add('open');
+            document.getElementById('todoTitle').focus();
+        }
+
+        function closeModal() {
+            document.getElementById('modal').classList.remove('open');
+            editingId = null;
+            creatingForListId = null;
+        }
+
+        document.getElementById('modal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closeModal();
+        });
+
+        document.getElementById('todoForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const title  = document.getElementById('todoTitle').value.trim();
+            const desc   = document.getElementById('todoDesc').value.trim();
+            const due    = document.getElementById('due_time').value;
+            const status = document.getElementById('todoStatus').value;
+            const btn    = document.getElementById('saveBtn');
+
+            if (!title || !due) {
+                showToast('Tous les champs sont requis.', true);
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>';
+
+            try {
+                if (editingId) {
+                    const updated = await updateTodo(editingId, title, desc, status, due);
+                    todos[todos.findIndex(t => t.id === editingId)] = updated;
+                } else {
+                    const newTodo = await createTodo(title, desc, due, creatingForListId);
+                    todos.push(newTodo);
+                }
+                closeModal();
+                renderBoard();
+                showToast(editingId ? 'Tâche mise à jour.' : 'Tâche créée !');
+            } catch (err) {
+                showToast(err.message, true);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Enregistrer';
+            }
+        });
+
+        // ── List modal ───────────────────────────────────────────
+
+        function openCreateListModal() {
+            editingListId = null;
+            document.getElementById('listModalTitle').textContent = 'Nouvelle liste';
+            document.getElementById('listForm').reset();
+            document.getElementById('listModal').classList.add('open');
+            document.getElementById('listTitle').focus();
+        }
+
+        function openEditListModal(id) {
+            const list = lists.find(l => l.id === id);
+            if (!list) return;
+            editingListId = id;
+            document.getElementById('listModalTitle').textContent = 'Renommer la liste';
+            document.getElementById('listTitle').value = list.title;
+            document.getElementById('listModal').classList.add('open');
+            document.getElementById('listTitle').focus();
+        }
+
+        function closeListModal() {
+            document.getElementById('listModal').classList.remove('open');
+            editingListId = null;
+        }
+
+        document.getElementById('listModal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closeListModal();
+        });
+
+        document.getElementById('listForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const title = document.getElementById('listTitle').value.trim();
+            const btn   = document.getElementById('listSaveBtn');
+
+            if (!title) {
+                showToast('Le nom est requis.', true);
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>';
+
+            try {
+                if (editingListId) {
+                    const updated = await updateList(editingListId, title);
+                    lists[lists.findIndex(l => l.id === editingListId)] = updated;
+                } else {
+                    const newList = await createList(title, boardId);
+                    lists.push(newList);
+                }
+                closeListModal();
+                renderBoard();
+                showToast(editingListId ? 'Liste mise à jour.' : 'Liste créée !');
+            } catch (err) {
+                showToast(err.message, true);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Enregistrer';
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { closeModal(); closeListModal(); }
+        });
+
+        // ── Init ─────────────────────────────────────────────────
+        loadBoard();
+        loadData();
+    </script>
+</body>
+</html>

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemboard — Inscription</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" type="image/png" href="resources/gemboard-icon.png">
+</head>
+<body>
+    <div class="auth-layout">
+        <div class="auth-card">
+            <span class="auth-wordmark"><img src="resources/gemboard-icon.png" alt="" class="brand-icon">gemboard_</span>
+            <h1 class="auth-title">Créer un compte</h1>
+            <p class="auth-sub">Déjà inscrit ? <a href="login.html">Se connecter</a></p>
+
+            <div class="alert alert-error" id="errorMsg" role="alert"></div>
+
+            <form id="registerForm" novalidate>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="firstname">Prénom</label>
+                        <input type="text" id="firstname" class="form-input"
+                            placeholder="Jean"
+                            autocomplete="given-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="name">Nom</label>
+                        <input type="text" id="name" class="form-input"
+                            placeholder="Dupont"
+                            autocomplete="family-name" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="email">Email</label>
+                    <input type="email" id="email" class="form-input"
+                        placeholder="vous@exemple.com"
+                        autocomplete="email" required>
+                </div>
+                <div class="form-group" style="margin-bottom: 22px;">
+                    <label class="form-label" for="password">Mot de passe</label>
+                    <input type="password" id="password" class="form-input"
+                        placeholder="••••••••"
+                        autocomplete="new-password" required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-full" id="submitBtn">
+                    Créer mon compte
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script src="js/api.js"></script>
+    <script>
+        if (getToken()) window.location.href = 'board.html';
+
+        const form      = document.getElementById('registerForm');
+        const errorMsg  = document.getElementById('errorMsg');
+        const submitBtn = document.getElementById('submitBtn');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorMsg.classList.remove('show');
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner"></span>&nbsp;Création…';
+
+            try {
+                const token = await register(
+                    document.getElementById('email').value.trim(),
+                    document.getElementById('password').value,
+                    document.getElementById('name').value.trim(),
+                    document.getElementById('firstname').value.trim()
+                );
+                setToken(token);
+                window.location.href = 'board.html';
+            } catch (err) {
+                errorMsg.textContent = err.message;
+                errorMsg.classList.add('show');
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Créer mon compte';
+            }
+        });
+    </script>
+</body>
+</html>
