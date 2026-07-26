@@ -7,18 +7,19 @@ interface Board extends RowDataPacket {
     user_id: number;
 }
 
-async function all_board_infos()
+async function all_board_infos(user_id : number)
 {
     const [rows] = await pool.execute<Board[]>(
-        'SELECT id, title AS name, created_at, user_id FROM board')
+        'SELECT id, title AS name, created_at, user_id FROM board WHERE user_id = ?',
+        [user_id])
     return rows
 }
 
-async function board_infos(id : number)
+async function board_infos(id : number, user_id : number)
 {
     const [rows] = await pool.execute<Board[]>(
-        'SELECT id, title AS name, created_at, user_id FROM board WHERE id = ?',
-        [id])
+        'SELECT id, title AS name, created_at, user_id FROM board WHERE id = ? AND user_id = ?',
+        [id, user_id])
     if (rows.length === 0)
         return null;
     return rows[0]
@@ -32,19 +33,19 @@ async function create_board(title : string, user_id : number)
     return result.insertId
 }
 
-async function update_board(title : string, id : number)
+async function update_board(title : string, id : number, user_id : number)
 {
     const [result] = await pool.execute<ResultSetHeader>(
-        'UPDATE board SET title = ? WHERE id = ?',
-        [title, id])
+        'UPDATE board SET title = ? WHERE id = ? AND user_id = ?',
+        [title, id, user_id])
     return result.affectedRows
 }
 
-async function delete_board(id : number)
+async function delete_board(id : number, user_id : number)
 {
     const [result] = await pool.execute<ResultSetHeader>(
-        'DELETE FROM board WHERE id = ?',
-        [id])
+        'DELETE FROM board WHERE id = ? AND user_id = ?',
+        [id, user_id])
     return result.affectedRows
 }
 
