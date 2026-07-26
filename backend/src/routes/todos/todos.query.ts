@@ -101,6 +101,18 @@ async function move_todo(id : number, list_id : number, position : number, user_
         }
         const oldListId = rows[0].list_id
 
+        // Validate target list ownership before touching its rows
+        const [targetListRows] = await conn.execute<RowDataPacket[]>(
+            `SELECT list.id
+             FROM list
+             JOIN board ON list.board_id = board.id
+             WHERE list.id = ? AND board.user_id = ? FOR UPDATE`,
+            [list_id, user_id])
+        if (targetListRows.length === 0) {
+            await conn.rollback()
+            return 0
+        }
+
         // Splice-and-rewrite: rebuild the target list's order in application code,
         // then renumber every sibling to a dense 0..n-1 range. This is immune to
         // pre-existing position gaps (e.g. left behind by a delete), unlike a
