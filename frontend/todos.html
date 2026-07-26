@@ -25,7 +25,7 @@
             </div>
         </div>
 
-        <div id="boardColumns" class="board-columns" ondragover="handleColumnsContainerDragOver(event)" ondrop="handleColumnsContainerDrop(event)"></div>
+        <div id="boardColumns" class="board-columns" ondragover="handleListsContainerDragOver(event)" ondrop="handleListsContainerDrop(event, null)"></div>
     </main>
 
     <!-- Toast -->
@@ -103,11 +103,14 @@
             window.location.href = 'board.html';
         }
 
+        const MAX_DEPTH = 3; // must match backend MAX_DEPTH (lists.query.ts)
+
         let lists = [];
         let todos = [];
         let editingId = null;       // todo id being edited, or null when creating
         let creatingForListId = null; // list id a new todo will be created into
         let editingListId = null;   // list id being renamed, or null when creating a list
+        let creatingListParentId = null; // parent list id for the list about to be created, or null for a top-level list
         let draggedTodoId = null;   // todo id currently being dragged, or null
         let draggedListId = null;   // list id currently being dragged, or null
 
@@ -156,6 +159,18 @@
             return todos.filter(t => t.list_id === listId).sort((a, b) => a.position - b.position);
         }
 
+        function childrenOf(parentId) {
+            return lists.filter(l => l.parent_list_id === parentId).sort((a, b) => a.position - b.position);
+        }
+
+        function collectDescendantListIds(id) {
+            const ids = [id];
+            for (const child of childrenOf(id)) {
+                ids.push(...collectDescendantListIds(child.id));
+            }
+            return ids;
+        }
+
         // ── Render ───────────────────────────────────────────────
 
         function updateCount() {
@@ -169,10 +184,10 @@
             const container = document.getElementById('boardColumns');
             updateCount();
 
-            const sortedLists = [...lists].sort((a, b) => a.position - b.position);
-            const columnsHtml = sortedLists.map(buildColumn).join('');
+            const sortedLists = childrenOf(null);
+            const columnsHtml = sortedLists.map(list => buildListNode(list, true)).join('');
             const addColumnHtml = `
-                <button class="board-column-add" onclick="openCreateListModal()">
+                <button class="board-column-add" onclick="openCreateListModal(null)">
                     + Nouvelle liste
                 </button>`;
 
@@ -187,7 +202,7 @@
                         <p class="empty-title">Aucune liste pour l'instant</p>
                         <p class="empty-desc">Une tâche doit appartenir à une liste — crée ta première liste pour commencer.</p>
                         <div style="margin-top:16px;">
-                            <button class="btn btn-primary" onclick="openCreateListModal()">+ Nouvelle liste</button>
+                            <button class="btn btn-primary" onclick="openCreateListModal(null)">+ Nouvelle liste</button>
                         </div>
                     </div>`;
                 return;
@@ -196,18 +211,33 @@
             container.innerHTML = columnsHtml + addColumnHtml;
         }
 
-        function buildColumn(list) {
+        function buildListNode(list, isTopLevel) {
             const listTodos = todosForList(list.id);
             const cardsHtml = listTodos.length === 0
                 ? `<p style="font-size:12.5px;color:var(--text-muted);padding:6px 4px;">Aucune tâche</p>`
                 : listTodos.map(buildCard).join('');
 
+            const subLists = childrenOf(list.id);
+            const canNest = list.depth < MAX_DEPTH;
+            const subListsHtml = subLists.length === 0 ? '' : `
+                <div class="sublist-group" data-parent-id="${list.id}"
+                     ondragover="handleListsContainerDragOver(event)" ondrop="handleListsContainerDrop(event, ${list.id})">
+                    ${subLists.map(child => buildListNode(child, false)).join('')}
+                </div>`;
+
+            const wrapperClass = isTopLevel ? 'board-column' : 'sublist';
+            const addSubListBtn = canNest ? `
+                        <button class="btn btn-ghost btn-icon" onclick="openCreateListModal(${list.id})" title="Ajouter une sous-liste" aria-label="Ajouter une sous-liste">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        </button>` : '';
+
             return `
-            <div class="board-column" data-list-id="${list.id}">
+            <div class="${wrapperClass} list-block" data-list-id="${list.id}" data-depth="${list.depth}">
                 <div class="board-column-header" draggable="true"
                      ondragstart="handleColumnDragStart(event, ${list.id})" ondragend="handleColumnDragEnd(event)">
                     <span class="board-column-title">${escHtml(list.title)}</span>
                     <div class="board-column-actions">
+                        ${addSubListBtn}
                         <button class="btn btn-ghost btn-icon" onclick="openEditListModal(${list.id})" title="Renommer" aria-label="Renommer la liste">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                         </button>
@@ -219,6 +249,7 @@
                 <div class="board-column-body" data-list-id="${list.id}"
                      ondragover="handleColumnDragOver(event)" ondrop="handleColumnDrop(event, ${list.id})">
                     ${cardsHtml}
+                    ${subListsHtml}
                 </div>
                 <div class="board-column-footer">
                     <button class="btn btn-ghost btn-sm" style="width:100%;" onclick="openCreateModal(${list.id})">+ Tâche</button>
@@ -317,12 +348,16 @@
         }
 
         async function handleDeleteList(id) {
-            if (!confirm('Supprimer cette liste et toutes ses tâches ?')) return;
+            const confirmMsg = childrenOf(id).length > 0
+                ? 'Supprimer cette liste, ses sous-listes et toutes leurs tâches ?'
+                : 'Supprimer cette liste et toutes ses tâches ?';
+            if (!confirm(confirmMsg)) return;
 
             try {
                 await deleteList(id);
-                lists = lists.filter(l => l.id !== id);
-                todos = todos.filter(t => t.list_id !== id);
+                const removedIds = new Set(collectDescendantListIds(id));
+                lists = lists.filter(l => !removedIds.has(l.id));
+                todos = todos.filter(t => !removedIds.has(t.list_id));
                 renderBoard();
             } catch (err) {
                 showToast(err.message, true);
@@ -338,24 +373,29 @@
         function handleCardDragEnd(e) {
             e.target.classList.remove('dragging');
             draggedTodoId = null;
-            document.querySelectorAll('.board-column').forEach(el => el.classList.remove('drag-over'));
+            document.querySelectorAll('.list-block').forEach(el => el.classList.remove('drag-over'));
         }
 
         function handleColumnDragOver(e) {
             if (draggedTodoId === null) return;
             e.preventDefault();
+            e.stopPropagation();
             e.dataTransfer.dropEffect = 'move';
-            e.currentTarget.closest('.board-column').classList.add('drag-over');
+            e.currentTarget.closest('.list-block').classList.add('drag-over');
         }
 
         async function handleColumnDrop(e, listId) {
             e.preventDefault();
-            e.currentTarget.closest('.board-column').classList.remove('drag-over');
+            e.stopPropagation();
+            e.currentTarget.closest('.list-block').classList.remove('drag-over');
             if (draggedTodoId === null) return;
 
             const id = draggedTodoId;
             const body = e.currentTarget;
-            const afterEl = [...body.querySelectorAll('.todo-card')].find(card => {
+            // :scope limits the match to this list's own cards — nested sublists
+            // (rendered inside the same body) have their own cards deeper down,
+            // which must not be counted when computing this list's drop index.
+            const afterEl = [...body.querySelectorAll(':scope > .todo-card')].find(card => {
                 if (Number(card.dataset.id) === id) return false;
                 const rect = card.getBoundingClientRect();
                 return e.clientY < rect.top + rect.height / 2;
@@ -377,6 +417,7 @@
 
         function handleColumnDragStart(e, id) {
             draggedListId = id;
+            e.stopPropagation();
             e.dataTransfer.effectAllowed = 'move';
         }
 
@@ -384,27 +425,35 @@
             draggedListId = null;
         }
 
-        function handleColumnsContainerDragOver(e) {
+        function handleListsContainerDragOver(e) {
             if (draggedListId === null) return;
             e.preventDefault();
+            e.stopPropagation();
             e.dataTransfer.dropEffect = 'move';
         }
 
-        async function handleColumnsContainerDrop(e) {
+        // parentId is the list these siblings are nested under (null = top-level,
+        // directly on the board). Top-level lists lay out horizontally, nested
+        // ones stack vertically, so the "insert before/after" test differs.
+        async function handleListsContainerDrop(e, parentId) {
             e.preventDefault();
+            e.stopPropagation();
             if (draggedListId === null) return;
 
             const id = draggedListId;
-            const columnEls = [...document.querySelectorAll('.board-column')];
-            const afterEl = columnEls.find(col => {
-                if (Number(col.dataset.listId) === id) return false;
-                const rect = col.getBoundingClientRect();
-                return e.clientX < rect.left + rect.width / 2;
+            const container = e.currentTarget;
+            const blockEls = [...container.querySelectorAll(':scope > .list-block')];
+            const afterEl = blockEls.find(el => {
+                if (Number(el.dataset.listId) === id) return false;
+                const rect = el.getBoundingClientRect();
+                return parentId === null
+                    ? e.clientX < rect.left + rect.width / 2
+                    : e.clientY < rect.top + rect.height / 2;
             });
-            const targetLists = [...lists].sort((a, b) => a.position - b.position).filter(l => l.id !== id);
+            const targetSiblings = childrenOf(parentId).filter(l => l.id !== id);
             const targetIndex = afterEl
-                ? targetLists.findIndex(l => l.id === Number(afterEl.dataset.listId))
-                : targetLists.length;
+                ? targetSiblings.findIndex(l => l.id === Number(afterEl.dataset.listId))
+                : targetSiblings.length;
 
             try {
                 await moveList(id, targetIndex);
@@ -499,9 +548,10 @@
 
         // ── List modal ───────────────────────────────────────────
 
-        function openCreateListModal() {
+        function openCreateListModal(parentId = null) {
             editingListId = null;
-            document.getElementById('listModalTitle').textContent = 'Nouvelle liste';
+            creatingListParentId = parentId;
+            document.getElementById('listModalTitle').textContent = parentId ? 'Nouvelle sous-liste' : 'Nouvelle liste';
             document.getElementById('listForm').reset();
             document.getElementById('listModal').classList.add('open');
             document.getElementById('listTitle').focus();
@@ -511,6 +561,7 @@
             const list = lists.find(l => l.id === id);
             if (!list) return;
             editingListId = id;
+            creatingListParentId = null;
             document.getElementById('listModalTitle').textContent = 'Renommer la liste';
             document.getElementById('listTitle').value = list.title;
             document.getElementById('listModal').classList.add('open');
@@ -520,6 +571,7 @@
         function closeListModal() {
             document.getElementById('listModal').classList.remove('open');
             editingListId = null;
+            creatingListParentId = null;
         }
 
         document.getElementById('listModal').addEventListener('click', (e) => {
@@ -545,7 +597,7 @@
                     const updated = await updateList(editingListId, title);
                     lists[lists.findIndex(l => l.id === editingListId)] = updated;
                 } else {
-                    const newList = await createList(title, boardId);
+                    const newList = await createList(title, boardId, creatingListParentId);
                     lists.push(newList);
                 }
                 closeListModal();

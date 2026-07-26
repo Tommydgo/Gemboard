@@ -125,11 +125,11 @@ async function getLists(boardId) {
     return apiCall(`/lists?board_id=${boardId}`, { headers: authHeaders() });
 }
 
-async function createList(title, boardId) {
+async function createList(title, boardId, parentListId = null) {
     return apiCall('/lists', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ title, board_id: boardId })
+        body: JSON.stringify({ title, board_id: boardId, parent_list_id: parentListId })
     });
 }
 

@@ -635,7 +635,7 @@ select.form-input {
     transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
 
-.board-column.drag-over {
+.list-block.drag-over {
     border-color: var(--lavender);
     box-shadow: 0 0 0 3px rgba(153,102,204,.15);
 }
@@ -691,6 +691,38 @@ select.form-input {
     color: var(--indigo);
     background: rgba(153,102,204,.05);
 }
+
+/* ─── Nested sublists (up to depth 3) ───────────────────────────────────── */
+.sublist-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border-light);
+}
+
+.sublist {
+    border: 1.5px solid var(--border-light);
+    border-left: 3px solid var(--lavender);
+    border-radius: 10px;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+}
+
+.sublist[data-depth="3"] { border-left-color: var(--border); }
+
+.sublist .board-column-header { padding: 8px 10px; }
+.sublist .board-column-title { font-size: 13.5px; }
+.sublist .board-column-body {
+    padding: 8px;
+    gap: 6px;
+    flex: none;
+    overflow: visible;
+    min-height: 0;
+}
+.sublist .board-column-footer { padding: 4px 8px 8px; }
 
 .todo-card[draggable="true"] { cursor: grab; }
 .todo-card.dragging { opacity: .4; }

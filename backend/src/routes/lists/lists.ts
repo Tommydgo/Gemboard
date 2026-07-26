@@ -1,6 +1,6 @@
 import express from 'express'
 import auth from '../../middleware/auth'
-import { all_list_infos, list_infos, create_list, update_list, delete_list, move_list } from './lists.query'
+import { all_list_infos, list_infos, create_list, update_list, delete_list, move_list, MAX_DEPTH } from './lists.query'
 import { board_infos } from '../boards/boards.query'
 
 const router = express.Router()
@@ -29,7 +29,7 @@ router.get('/lists/:id', auth, async (req, res) => {
 })
 
 router.post('/lists', auth, async (req, res) => {
-    const { title, board_id } = req.body;
+    const { title, board_id, parent_list_id } = req.body;
 
     if (!(title && board_id))
         return res.status(400).json({"msg": "Bad parameter"})
@@ -40,7 +40,21 @@ router.post('/lists', auth, async (req, res) => {
     if (!target_board)
         return res.status(404).json({ "msg": "Not found" });
 
-    const list_id = await create_list(title, board_id)
+    let depth = 1
+    let parentId: number | null = null
+    if (parent_list_id !== undefined && parent_list_id !== null) {
+        parentId = Number(parent_list_id)
+        if (Number.isNaN(parentId))
+            return res.status(400).json({ "msg": "Bad parameter" });
+        const parent_list = await list_infos(parentId)
+        if (!parent_list || parent_list.board_id !== Number(board_id))
+            return res.status(404).json({ "msg": "Not found" });
+        if (parent_list.depth >= MAX_DEPTH)
+            return res.status(400).json({ "msg": `Max nesting depth (${MAX_DEPTH}) reached` });
+        depth = parent_list.depth + 1
+    }
+
+    const list_id = await create_list(title, board_id, parentId, depth)
     const list = await list_infos(list_id)
     return res.status(200).json(list)
 })

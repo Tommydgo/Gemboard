@@ -1,17 +1,21 @@
 import pool, { RowDataPacket, ResultSetHeader } from '../../config/db'
 
+export const MAX_DEPTH = 3
+
 interface List extends RowDataPacket {
     id: number;
     title: string;
     position: number;
     board_id: number;
+    parent_list_id: number | null;
+    depth: number;
     created_at: Date | string;
 }
 
 async function all_list_infos(board_id: number)
 {
     const [rows] = await pool.execute<List[]>(
-        'SELECT id, title, position, board_id, created_at FROM list WHERE board_id = ? ORDER BY position ASC',
+        'SELECT id, title, position, board_id, parent_list_id, depth, created_at FROM list WHERE board_id = ? ORDER BY position ASC',
         [board_id])
     return rows
 }
@@ -19,25 +23,25 @@ async function all_list_infos(board_id: number)
 async function list_infos(id : number)
 {
     const [rows] = await pool.execute<List[]>(
-        'SELECT id, title, position, board_id, created_at FROM list WHERE id = ?',
+        'SELECT id, title, position, board_id, parent_list_id, depth, created_at FROM list WHERE id = ?',
         [id])
     if (rows.length === 0)
         return null;
     return rows[0]
 }
 
-async function create_list(title : string, board_id : number)
+async function create_list(title : string, board_id : number, parent_list_id : number | null, depth : number)
 {
     const conn = await pool.getConnection()
     try {
         await conn.beginTransaction()
         const [maxRows] = await conn.execute<RowDataPacket[]>(
-            'SELECT COALESCE(MAX(position), -1) AS maxPos FROM list WHERE board_id = ? FOR UPDATE',
-            [board_id])
+            'SELECT COALESCE(MAX(position), -1) AS maxPos FROM list WHERE board_id = ? AND parent_list_id IS ? FOR UPDATE',
+            [board_id, parent_list_id])
         const nextPosition = (maxRows[0].maxPos as number) + 1
         const [result] = await conn.execute<ResultSetHeader>(
-            'INSERT INTO list (title, position, board_id) VALUES (?, ?, ?)',
-            [title, nextPosition, board_id])
+            'INSERT INTO list (title, position, board_id, parent_list_id, depth) VALUES (?, ?, ?, ?, ?)',
+            [title, nextPosition, board_id, parent_list_id, depth])
         await conn.commit()
         return result.insertId
     } catch (err) {
@@ -70,21 +74,23 @@ async function move_list(id : number, position : number)
     try {
         await conn.beginTransaction()
         const [rows] = await conn.execute<List[]>(
-            'SELECT board_id, position FROM list WHERE id = ? FOR UPDATE',
+            'SELECT board_id, position, parent_list_id FROM list WHERE id = ? FOR UPDATE',
             [id])
         if (rows.length === 0) {
             await conn.rollback()
             return 0
         }
         const boardId = rows[0].board_id
+        const parentListId = rows[0].parent_list_id
 
-        // Splice-and-rewrite: rebuild the board's list order in application code,
-        // then renumber every sibling to a dense 0..n-1 range. This is immune to
-        // pre-existing position gaps (e.g. left behind by a delete), unlike a
-        // range-shift that assumes stored positions are contiguous.
+        // Splice-and-rewrite: rebuild the sibling order (same board + same parent
+        // list) in application code, then renumber every sibling to a dense
+        // 0..n-1 range. This is immune to pre-existing position gaps (e.g. left
+        // behind by a delete), unlike a range-shift that assumes stored
+        // positions are contiguous.
         const [siblingRows] = await conn.execute<List[]>(
-            'SELECT id FROM list WHERE board_id = ? ORDER BY position ASC FOR UPDATE',
-            [boardId])
+            'SELECT id FROM list WHERE board_id = ? AND parent_list_id IS ? ORDER BY position ASC FOR UPDATE',
+            [boardId, parentListId])
         const siblingIds = siblingRows.map(row => row.id).filter(rowId => rowId !== id)
         const index = Math.max(0, Math.min(position, siblingIds.length))
         siblingIds.splice(index, 0, id)
