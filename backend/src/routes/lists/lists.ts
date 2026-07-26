@@ -7,20 +7,22 @@ const router = express.Router()
 
 router.get('/lists', auth, async (req, res) => {
     const board_id = Number(req.query.board_id)
+    const user_id = res.locals.user.id
 
     if (Number.isNaN(board_id))
         return res.status(400).json({ "msg": "Bad parameter" });
-    const infos = await all_list_infos(board_id)
+    const infos = await all_list_infos(board_id, user_id)
 
     return res.status(200).json(infos)
 })
 
 router.get('/lists/:id', auth, async (req, res) => {
     const list_id = Number(req.params.id)
+    const user_id = res.locals.user.id
 
     if (Number.isNaN(list_id))
         return res.status(400).json({ "msg": "Bad parameter" });
-    const infos = await list_infos(list_id)
+    const infos = await list_infos(list_id, user_id)
 
     if (!infos) {
         return res.status(404).json({ "msg": "Not found" });
@@ -30,13 +32,14 @@ router.get('/lists/:id', auth, async (req, res) => {
 
 router.post('/lists', auth, async (req, res) => {
     const { title, board_id, parent_list_id } = req.body;
+    const user_id = res.locals.user.id
 
     if (!(title && board_id))
         return res.status(400).json({"msg": "Bad parameter"})
     if (Number.isNaN(Number(board_id)))
         return res.status(400).json({ "msg": "Bad parameter" });
 
-    const target_board = await board_infos(Number(board_id))
+    const target_board = await board_infos(Number(board_id), user_id)
     if (!target_board)
         return res.status(404).json({ "msg": "Not found" });
 
@@ -46,7 +49,7 @@ router.post('/lists', auth, async (req, res) => {
         parentId = Number(parent_list_id)
         if (Number.isNaN(parentId))
             return res.status(400).json({ "msg": "Bad parameter" });
-        const parent_list = await list_infos(parentId)
+        const parent_list = await list_infos(parentId, user_id)
         if (!parent_list || parent_list.board_id !== Number(board_id))
             return res.status(404).json({ "msg": "Not found" });
         if (parent_list.depth >= MAX_DEPTH)
@@ -55,31 +58,33 @@ router.post('/lists', auth, async (req, res) => {
     }
 
     const list_id = await create_list(title, board_id, parentId, depth)
-    const list = await list_infos(list_id)
+    const list = await list_infos(list_id, user_id)
     return res.status(200).json(list)
 })
 
 router.put('/lists/:id', auth, async (req, res) => {
     const list_id : number = Number(req.params.id)
+    const user_id = res.locals.user.id
 
     if (Number.isNaN(list_id))
         return res.status(400).json({ "msg": "Bad parameter" });
     if (!req.body.title) {
         return res.status(400).json({ "msg": "Bad parameter" });
     }
-    const status = await update_list(req.body.title, list_id)
+    const status = await update_list(req.body.title, list_id, user_id)
     if (status === 0)
         return res.status(404).json({ "msg": "Not found" });
-    const updated_list = await list_infos(list_id);
+    const updated_list = await list_infos(list_id, user_id);
     return res.status(200).json(updated_list);
 })
 
 router.delete('/lists/:id', auth, async (req, res) => {
     const list_id : number = Number(req.params.id)
+    const user_id = res.locals.user.id
 
     if (Number.isNaN(list_id))
         return res.status(400).json({ "msg": "Bad parameter" });
-    const st : number = await delete_list(list_id)
+    const st : number = await delete_list(list_id, user_id)
 
     if (st === 0) {
         return res.status(404).json({ "msg": "Not found" });
@@ -90,13 +95,14 @@ router.delete('/lists/:id', auth, async (req, res) => {
 router.patch('/lists/:id/move', auth, async (req, res) => {
     const list_id : number = Number(req.params.id)
     const position : number = Number(req.body.position)
+    const user_id = res.locals.user.id
 
     if (Number.isNaN(list_id) || Number.isNaN(position))
         return res.status(400).json({ "msg": "Bad parameter" });
-    const status = await move_list(list_id, position)
+    const status = await move_list(list_id, position, user_id)
     if (status === 0)
         return res.status(404).json({ "msg": "Not found" });
-    const updated_list = await list_infos(list_id);
+    const updated_list = await list_infos(list_id, user_id);
     return res.status(200).json(updated_list);
 })
 

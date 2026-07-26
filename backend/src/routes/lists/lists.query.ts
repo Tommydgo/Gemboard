@@ -12,19 +12,26 @@ interface List extends RowDataPacket {
     created_at: Date | string;
 }
 
-async function all_list_infos(board_id: number)
+async function all_list_infos(board_id: number, user_id: number)
 {
     const [rows] = await pool.execute<List[]>(
-        'SELECT id, title, position, board_id, parent_list_id, depth, created_at FROM list WHERE board_id = ? ORDER BY position ASC',
-        [board_id])
+        `SELECT list.id, list.title, list.position, list.board_id, list.parent_list_id, list.depth, list.created_at
+         FROM list
+         JOIN board ON list.board_id = board.id
+         WHERE list.board_id = ? AND board.user_id = ?
+         ORDER BY list.position ASC`,
+        [board_id, user_id])
     return rows
 }
 
-async function list_infos(id : number)
+async function list_infos(id : number, user_id: number)
 {
     const [rows] = await pool.execute<List[]>(
-        'SELECT id, title, position, board_id, parent_list_id, depth, created_at FROM list WHERE id = ?',
-        [id])
+        `SELECT list.id, list.title, list.position, list.board_id, list.parent_list_id, list.depth, list.created_at
+         FROM list
+         JOIN board ON list.board_id = board.id
+         WHERE list.id = ? AND board.user_id = ?`,
+        [id, user_id])
     if (rows.length === 0)
         return null;
     return rows[0]
@@ -52,30 +59,35 @@ async function create_list(title : string, board_id : number, parent_list_id : n
     }
 }
 
-async function update_list(title : string, id : number)
+async function update_list(title : string, id : number, user_id: number)
 {
     const [result] = await pool.execute<ResultSetHeader>(
-        'UPDATE list SET title = ? WHERE id = ?',
-        [title, id])
+        `UPDATE list SET title = ?
+         WHERE id = ? AND board_id IN (SELECT id FROM board WHERE user_id = ?)`,
+        [title, id, user_id])
     return result.affectedRows
 }
 
-async function delete_list(id : number)
+async function delete_list(id : number, user_id: number)
 {
     const [result] = await pool.execute<ResultSetHeader>(
-        'DELETE FROM list WHERE id = ?',
-        [id])
+        `DELETE FROM list
+         WHERE id = ? AND board_id IN (SELECT id FROM board WHERE user_id = ?)`,
+        [id, user_id])
     return result.affectedRows
 }
 
-async function move_list(id : number, position : number)
+async function move_list(id : number, position : number, user_id: number)
 {
     const conn = await pool.getConnection()
     try {
         await conn.beginTransaction()
         const [rows] = await conn.execute<List[]>(
-            'SELECT board_id, position, parent_list_id FROM list WHERE id = ? FOR UPDATE',
-            [id])
+            `SELECT list.board_id, list.position, list.parent_list_id
+             FROM list
+             JOIN board ON list.board_id = board.id
+             WHERE list.id = ? AND board.user_id = ? FOR UPDATE`,
+            [id, user_id])
         if (rows.length === 0) {
             await conn.rollback()
             return 0
