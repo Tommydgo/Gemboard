@@ -12,22 +12,28 @@ interface Todo extends RowDataPacket {
     position: number;
 }
 
-async function all_todo_infos(board_id : number)
+async function all_todo_infos(board_id : number, user_id: number)
 {
     const [rows] = await pool.execute<Todo[]>(
         `SELECT todo.id, todo.title, todo.description, todo.created_at, todo.due_time, todo.status, todo.user_id, todo.list_id, todo.position
-         FROM todo JOIN list ON todo.list_id = list.id
-         WHERE list.board_id = ?
+         FROM todo
+         JOIN list ON todo.list_id = list.id
+         JOIN board ON list.board_id = board.id
+         WHERE list.board_id = ? AND board.user_id = ?
          ORDER BY todo.position ASC`,
-        [board_id])
+        [board_id, user_id])
     return rows
 }
 
-async function todo_infos(id : number)
+async function todo_infos(id : number, user_id: number)
 {
     const [rows] = await pool.execute<Todo[]>(
-        'SELECT id, title, description, created_at, due_time, status, user_id, list_id, position FROM todo WHERE id = ?',
-        [id])
+        `SELECT todo.id, todo.title, todo.description, todo.created_at, todo.due_time, todo.status, todo.user_id, todo.list_id, todo.position
+         FROM todo
+         JOIN list ON todo.list_id = list.id
+         JOIN board ON list.board_id = board.id
+         WHERE todo.id = ? AND board.user_id = ?`,
+        [id, user_id])
     if (rows.length === 0)
         return null;
     return rows[0]
@@ -55,30 +61,40 @@ async function create_todo(title : string, description : string, due_time : stri
     }
 }
 
-async function update_todo(title : string, description : string, status : string, due_time : string, id : number)
+async function update_todo(title : string, description : string, status : string, due_time : string, id : number, user_id: number)
 {
     const [result] = await pool.execute<ResultSetHeader>(
-        'UPDATE todo SET title = ?, description = ?, due_time = ?, status = ? WHERE id = ?',
-        [title, description, due_time, status, id])
+        `UPDATE todo SET title = ?, description = ?, due_time = ?, status = ?
+         WHERE id = ? AND list_id IN (
+             SELECT list.id FROM list JOIN board ON list.board_id = board.id WHERE board.user_id = ?
+         )`,
+        [title, description, due_time, status, id, user_id])
     return result.affectedRows
 }
 
-async function delete_todo(id : number)
+async function delete_todo(id : number, user_id: number)
 {
     const [result] = await pool.execute<ResultSetHeader>(
-        'DELETE FROM todo WHERE id = ?',
-        [id])
+        `DELETE FROM todo
+         WHERE id = ? AND list_id IN (
+             SELECT list.id FROM list JOIN board ON list.board_id = board.id WHERE board.user_id = ?
+         )`,
+        [id, user_id])
     return result.affectedRows
 }
 
-async function move_todo(id : number, list_id : number, position : number)
+async function move_todo(id : number, list_id : number, position : number, user_id: number)
 {
     const conn = await pool.getConnection()
     try {
         await conn.beginTransaction()
         const [rows] = await conn.execute<Todo[]>(
-            'SELECT list_id, position FROM todo WHERE id = ? FOR UPDATE',
-            [id])
+            `SELECT todo.list_id, todo.position
+             FROM todo
+             JOIN list ON todo.list_id = list.id
+             JOIN board ON list.board_id = board.id
+             WHERE todo.id = ? AND board.user_id = ? FOR UPDATE`,
+            [id, user_id])
         if (rows.length === 0) {
             await conn.rollback()
             return 0
